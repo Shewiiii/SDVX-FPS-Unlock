@@ -23,7 +23,7 @@ On that page, scroll to **Assets** and click `SDVX-FPS-Unlock-v….zip`
 
 The installer selects the patches in spice2x for you and, on portrait monitors, sets Monitor Refresh Rate.
 
-![The installer lists the monitor's refresh rates; entering 240 sets everything up](docs/images/installer.png)
+![The installer lists the monitor's refresh rates; pressing Enter uses 300, selects the patches and turns on the knob fix](docs/images/installer.png)
 
 If you enter a rate the monitor does not support, the installer warns you and lets you cancel and try again:
 

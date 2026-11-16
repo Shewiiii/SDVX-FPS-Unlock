@@ -23,7 +23,7 @@
 
 安装器会自动在 spice2x 里选好补丁，竖屏显示器还会设好 Monitor Refresh Rate。
 
-![安装器列出显示器刷新率，输入 240 后自动完成设置](docs/images/installer.png)
+![安装器列出显示器刷新率，直接回车用 300，自动选好补丁并打开旋钮修复](docs/images/installer.png)
 
 填了显示器不支持的数，安装器会提醒，可以取消重填：
 
