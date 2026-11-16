@@ -50,6 +50,7 @@ Check the troubleshooting list below first. If that does not help, [file a bug](
 
 - Fully restart the game after installing.
 - Portrait monitor: if the installer says it will not set Monitor Refresh Rate, the monitor lacks that rate in the game's 1080×1920 fullscreen mode; pick one of the listed rates.
+- Monitor is landscape and your launcher rotates it only for the game: the installer goes by the last launch, so start the game once as usual, then run `install.bat` again (its "Last launch" line should say portrait).
 - V-Sync forced in the GPU driver: set it back to *Use the 3D application setting* in the NVIDIA Control Panel.
 
 </details>

@@ -382,7 +382,20 @@ foreach ($d in $displays) {
     $tag = if ($d -eq $main -and $displays.Count -gt 1) { T '  ← 游戏用这块' '  ← used by the game' } else { '' }
     Item (T '显示器' 'Monitor') ('{0}  {1}x{2}  {3} {4} Hz{5}' -f $d.Name, $d.Width, $d.Height, (T '当前' 'now'), $d.Hz, $tag)
 }
+# "portrait" = the game runs 1080x1920 fullscreen on V-Sync. At start it looks for a 1080x1920 @ 120 Hz mode, which
+# only exists while the monitor is rotated, and uses V-Sync if found; otherwise it asks for 60 Hz and runs on its own
+# limiter. Launchers often rotate the monitor only while the game runs, so the mode the game asked for at its last
+# launch (logged by spice) beats the desktop orientation right now, which is only the fallback.
 $portrait = $main -and $main.Height -gt $main.Width
+$lastMode = $null
+if (Test-Path -LiteralPath $logFile) {
+    $found = [regex]::Matches([IO.File]::ReadAllText($logFile, $Latin1), 'fullscreen display mode for adapter 0: Width: (\d+), Height: (\d+), RefreshRate: (\d+)')
+    if ($found.Count) { $lastMode = $found[$found.Count - 1] }
+}
+if ($lastMode) {
+    $portrait = [int]$lastMode.Groups[3].Value -eq 120
+    Item (T '上次启动' 'Last launch') ('{0}x{1} @ {2} Hz  {3}' -f $lastMode.Groups[1].Value, $lastMode.Groups[2].Value, $lastMode.Groups[3].Value, $(if ($portrait) { T '（竖屏，垂直同步）' '(portrait, V-Sync)' } else { T '（横屏）' '(landscape)' }))
+}
 # portrait runs exclusive fullscreen at 1080x1920, so only that mode's refresh rates are usable there
 $gameRates = if ($main) { @($main.GameRates) } else { @() }
 $okRates = if ($portrait -and $gameRates.Count) { $gameRates } elseif ($main) { @($main.Rates) } else { @() }
