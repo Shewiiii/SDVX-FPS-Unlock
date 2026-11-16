@@ -71,9 +71,16 @@
 </details>
 
 <details>
+<summary><b>选曲界面旋钮慢转没反应</b></summary>
+
+游戏菜单里的旋钮处理按 120 帧写死，帧数越高，慢转越容易被忽略（不用本工具、只调高刷新率也一样）。帧数高于 120 时安装器会自动打开 **Knob Fix for High FPS** 补丁修正这一点。用旧版安装器装过的，下载新版重新运行一次 `install.bat`。
+
+</details>
+
+<details>
 <summary><b>安装器提示「需要手动选择」</b></summary>
 
-游戏还没用 spice2x 启动过。先启动一次游戏再运行安装器，或者手动设置：**F4 → Patches** 把 Game FPS Target、Note FPS Target、Frame Limiter Target (Experimental) 选成同一个数，点 **Save**，重启游戏。竖屏显示器还要在 **F4 → Options → Display → Monitor → Monitor Refresh Rate** 填同一个数。
+游戏还没用 spice2x 启动过。先启动一次游戏再运行安装器，或者手动设置：**F4 → Patches** 把 Game FPS Target、Note FPS Target、Frame Limiter Target (Experimental) 选成同一个数，高于 120 帧时再勾上 Knob Fix for High FPS，点 **Save**，重启游戏。竖屏显示器还要在 **F4 → Options → Display → Monitor → Monitor Refresh Rate** 填同一个数。
 
 ![F4 → Patches 中三项都选 180 FPS](docs/images/patches.png)
 

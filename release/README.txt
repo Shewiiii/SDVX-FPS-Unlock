@@ -12,8 +12,8 @@ https://github.com/xiaoming6680/SDVX-FPS-Unlock
 3. 输入目标帧数后回车（直接回车用显示器最高刷新率）。
    尽量填安装器列出的、显示器支持的刷新率，不要用和显示器不符的帧数：不符时画面会不顺滑或撕裂，
    竖屏显示器上 Live2D 角色动画还会变快或变慢。
-4. 安装器会自动在 spice2x 里选好三个补丁，竖屏显示器同时设好 Monitor Refresh Rate。直接启动游戏即可。
-   想换帧数就重新运行 install.bat。
+4. 安装器会自动在 spice2x 里选好三个补丁，高于 120 帧时还会打开选曲界面旋钮修复（Knob Fix for High FPS），
+   竖屏显示器同时设好 Monitor Refresh Rate。直接启动游戏即可。想换帧数就重新运行 install.bat。
 
 卸载：重新运行 install.bat 输入 120。完全还原：把安装器备份的 *.before-fps-unlock.bak 改名覆盖回原文件。
 改了帧数后启动不了：重新运行 install.bat 填 120。
@@ -36,8 +36,9 @@ Install
    Pick one of the refresh rates the installer lists; avoid frame rates that do not match your
    monitor. A mismatch stutters or tears, and on portrait monitors Live2D animations also run
    too fast or slow.
-4. The installer selects all three patches in spice2x and, on portrait monitors, sets
-   Monitor Refresh Rate. Just start the game. Re-run install.bat to change the frame rate.
+4. The installer selects all three patches in spice2x, turns on the menu knob fix
+   (Knob Fix for High FPS) above 120 FPS and, on portrait monitors, sets Monitor Refresh Rate.
+   Just start the game. Re-run install.bat to change the frame rate.
 
 Uninstall: re-run install.bat and enter 120. To restore everything, rename the installer's
 *.before-fps-unlock.bak backups back over the originals.

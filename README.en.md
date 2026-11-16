@@ -71,9 +71,16 @@ Run `install.bat` again and enter 120 (or set Monitor Refresh Rate back to 120 i
 </details>
 
 <details>
+<summary><b>Slow knob turns do nothing in song select</b></summary>
+
+The game's menu knob handling assumes 120 FPS, so the higher the frame rate, the more slow turns get ignored (this also happens without this tool if you just raise the refresh rate). Above 120 FPS the installer turns on the **Knob Fix for High FPS** patch to correct this. If you installed with an older version, download the new one and run `install.bat` again.
+
+</details>
+
+<details>
 <summary><b>The installer says to select the patches manually</b></summary>
 
-The game has not been launched with spice2x yet. Launch it once and re-run the installer, or set it up by hand: in **F4 → Patches** set Game FPS Target, Note FPS Target and Frame Limiter Target (Experimental) to the same value, click **Save** and restart. Portrait monitors also need **F4 → Options → Display → Monitor → Monitor Refresh Rate** set to that value.
+The game has not been launched with spice2x yet. Launch it once and re-run the installer, or set it up by hand: in **F4 → Patches** set Game FPS Target, Note FPS Target and Frame Limiter Target (Experimental) to the same value, turn on Knob Fix for High FPS when above 120 FPS, click **Save** and restart. Portrait monitors also need **F4 → Options → Display → Monitor → Monitor Refresh Rate** set to that value.
 
 ![F4 → Patches with all three set to 180 FPS](docs/images/patches.png)
 

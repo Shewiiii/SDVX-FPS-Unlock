@@ -7,6 +7,11 @@ $MaxFps = 1000
 $LimiterName = 'Frame Limiter Target (Experimental)'
 # mov ebx, 120000 ; mov edx, ebx ; mov rcx, rax ; call -- sets the game's internal frame limiter (mHz)
 $LimiterSig = 'BBC0D401008BD3488BC8E8'
+$KnobFixName = 'Knob Fix for High FPS'
+# menu knob filter: lea eax,[r9+r9*4] ; add eax,eax ; movd xmm1,eax ; cvtdq2pd xmm1,xmm1 ; mulsd xmm1,xmm2 ; addsd xmm1,[rdi+18h]
+# the mulsd scales slow knob movement by frame time (1.0 = 1/120 s), so menus ignore slow turns above 120 FPS
+$KnobSig = '438D048903C0660F6EC8F30FE6C9F20F59CAF20F584F18'
+$KnobMulAt = 14
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Latin1 = [Text.Encoding]::GetEncoding(28591)
 $Utf8 = New-Object Text.UTF8Encoding $false
@@ -54,6 +59,14 @@ function Bytes([string]$hex) { [byte[]]($hex -split '(..)' | Where-Object { $_ }
 function Slice([byte[]]$b, [int]$off, [int]$len) { [byte[]]$b[$off..($off + $len - 1)] }
 function Le32([int]$v) { Hex ([BitConverter]::GetBytes([int32]$v)) }
 function Sha256([string]$s) { Hex ((New-Object Security.Cryptography.SHA256Managed).ComputeHash($Utf8.GetBytes($s))) }
+# spice identifies a patch by sha256(gameCode + patch file id + name + description)
+function Patch-Hash($p) { (Sha256 "$($p.gameCode)$patchId$($p.name)$($p.description)").ToLower() }
+# every file offset where the byte signature occurs ($text is the dll read as Latin-1)
+function Find-All([string]$text, [string]$hex) {
+    $sig = $Latin1.GetString((Bytes $hex))
+    $i = $text.IndexOf($sig, [StringComparison]::Ordinal)
+    while ($i -ge 0) { $i; $i = $text.IndexOf($sig, $i + 1, [StringComparison]::Ordinal) }
+}
 
 function New-Option([string]$name, [int]$offset, [string]$data) {
     [pscustomobject]@{ name = $name; patch = [pscustomobject]@{ offset = $offset; dllName = 'soundvoltex.dll'; data = $data } }
@@ -178,11 +191,22 @@ if ((Hex (Slice $dll $nOff ($n60.patch.data.Length / 2))) -ne $n60.patch.data.To
 
 # internal frame limiter: find the instruction by signature, it must be unique
 $text = $Latin1.GetString($dll)
-$sig = $Latin1.GetString((Bytes $LimiterSig))
-$hits = @(); $i = $text.IndexOf($sig, [StringComparison]::Ordinal)
-while ($i -ge 0) { $hits += $i; $i = $text.IndexOf($sig, $i + 1, [StringComparison]::Ordinal) }
+$hits = @(Find-All $text $LimiterSig)
 if ($hits.Count -ne 1) { Fail "找到 $($hits.Count) 处限帧器特征码（需要正好 1 处），这个版本不支持。" "Found $($hits.Count) frame limiter signatures (exactly 1 required); this version is not supported." 6 }
 $lOff = $hits[0]
+
+# menu knob filter: optional, the frame rate unlock works without it
+$kHits = @(Find-All $text $KnobSig)
+$knob = $null
+if ($kHits.Count -eq 1) {
+    $knob = [pscustomobject]@{
+        name = $KnobFixName
+        description = 'Makes slow knob turns register in menus (music select, level select, card registration) above 120 FPS. The game scales small knob movements by frame time; this removes the scaling.'
+        gameCode = 'KFC'
+        type = 'memory'
+        patches = @([pscustomobject]@{ offset = $kHits[0] + $KnobMulAt; dllName = 'soundvoltex.dll'; dataDisabled = 'F20F59CA'; dataEnabled = '0F1F4000' })
+    }
+}
 
 # --- spice2x settings: the last launch's arguments in log.txt tell where the launcher keeps them
 $logArgs = ''
@@ -294,26 +318,38 @@ $limiter = [pscustomobject]@{
 
 $out = New-Object System.Collections.ArrayList
 foreach ($p in $patches) {
-    if ($p.name -eq $LimiterName) { continue }
+    if ($p.name -eq $LimiterName -or $p.name -eq $KnobFixName) { continue }
     [void]$out.Add($p)
-    if ($p.name -eq 'Note FPS Target') { [void]$out.Add($limiter) }
+    if ($p.name -eq 'Note FPS Target') {
+        [void]$out.Add($limiter)
+        if ($knob) { [void]$out.Add($knob) }
+    }
 }
+$knobOn = $knob -and $Fps -gt 120
 
 Step 3 '写入设置' 'Applying settings'
 Backup $patchFile
 [IO.File]::WriteAllText($patchFile, (ConvertTo-Json -InputObject $out.ToArray() -Depth 20), $Utf8)
 Ok '补丁文件已更新' 'Patch file updated'
+if (-not $knob -and $Fps -gt 120) {
+    Warn "这个版本找到 $($kHits.Count) 处旋钮修复特征码（需要正好 1 处），没有加旋钮修复：高帧数下选曲界面慢转旋钮可能没反应" "Found $($kHits.Count) knob fix signatures (exactly 1 required), so the knob fix was not added: slow knob turns may not register in menus at high frame rates"
+}
 
-# --- select the three patches in spice2x's patch manager
-# spice identifies a patch by sha256(gameCode + patch file id + name + description)
+# --- select the patches in spice2x's patch manager
 $selected = $false
 if ($managerFile) {
     $cfg = ConvertFrom-Json ([IO.File]::ReadAllText($managerFile))
     if (-not $cfg.union_patches_enabled) { $cfg | Add-Member -NotePropertyName union_patches_enabled -NotePropertyValue ([pscustomobject]@{}) -Force }
     foreach ($p in @($game, $note, $limiter)) {
         $opt = $p.patches | Where-Object { $_.name -match "^$Fps FPS( \(Default\))?$" } | Select-Object -First 1
-        $hash = (Sha256 ("$($p.gameCode)$patchId$($p.name)$($p.description)")).ToLower()
-        $cfg.union_patches_enabled | Add-Member -NotePropertyName $hash -NotePropertyValue $opt.name -Force
+        $cfg.union_patches_enabled | Add-Member -NotePropertyName (Patch-Hash $p) -NotePropertyValue $opt.name -Force
+    }
+    # on/off patches are a plain list of enabled hashes; the knob fix is only wanted above 120 FPS
+    if ($knob -and ($knobOn -or $null -ne $cfg.patches_enabled)) {
+        $kHash = Patch-Hash $knob
+        $enabled = @($cfg.patches_enabled | Where-Object { $_ -and $_ -ne $kHash })
+        if ($knobOn) { $enabled += $kHash }
+        $cfg | Add-Member -NotePropertyName patches_enabled -NotePropertyValue $enabled -Force
     }
     # auto apply makes spice apply the saved selection at every launch
     $ident = Join-Path $contents 'prop\ea3-ident.xml'
@@ -327,6 +363,7 @@ if ($managerFile) {
     Write-Text $managerFile (ConvertTo-Json -InputObject $cfg -Depth 20)
     $selected = $true
     Ok "spice2x 已选中三项补丁  $Fps FPS" "Selected all three patches in spice2x  $Fps FPS"
+    if ($knobOn) { Ok "旋钮修复已开启  $KnobFixName" "Knob fix turned on  $KnobFixName" }
 } else {
     Warn '没找到 spice2x 的补丁设置（游戏还没启动过？），需要手动选择' 'spice2x patch settings not found (game never launched?); select the patches manually'
 }
@@ -370,10 +407,12 @@ Rule
 if ($selected) {
     Write-Host ('  ' + (T '安装完成！直接启动游戏，帧数显示在 ESC 菜单里打开' 'Done! Start the game; turn on the FPS counter in the ESC menu')) -ForegroundColor Green
 } else {
-    Write-Host ('  ' + (T "安装完成。启动游戏 -> F4 -> Patches，把下面三项都选成 $Fps FPS，点 Save 后重启游戏：" "Done. Start the game -> F4 -> Patches, set these three to $Fps FPS, click Save and restart:")) -ForegroundColor Green
+    Write-Host ('  ' + (T "安装完成。启动游戏 -> F4 -> Patches，把下面三项都选成 $Fps FPS：" "Done. Start the game -> F4 -> Patches and set these three to $Fps FPS:")) -ForegroundColor Green
     Write-Host '     Game FPS Target'
     Write-Host '     Note FPS Target'
     Write-Host "     $LimiterName"
+    if ($knobOn) { Write-Host ('  ' + (T "再勾上 $KnobFixName（选曲界面旋钮修复）" "Also turn on $KnobFixName (menu knob fix)")) -ForegroundColor Green }
+    Write-Host ('  ' + (T '然后点 Save，重启游戏' 'Then click Save and restart the game')) -ForegroundColor Green
 }
 if ($portrait -and -not $refreshDone -and ($gameRates -contains $Fps)) {
     Say "竖屏显示器还要设：F4 -> Options -> Display -> Monitor -> Monitor Refresh Rate 填 $Fps，再重启游戏" "Portrait monitor: also set F4 -> Options -> Display -> Monitor -> Monitor Refresh Rate to $Fps and restart" 'Yellow'
