@@ -15,7 +15,8 @@ https://github.com/xiaoming6680/SDVX-FPS-Unlock
 4. 安装器会自动在 spice2x 里选好三个补丁，高于 120 帧时还会打开选曲界面旋钮修复（Knob Fix for High FPS），
    竖屏显示器同时设好 Monitor Refresh Rate。直接启动游戏即可。想换帧数就重新运行 install.bat。
 
-卸载：重新运行 install.bat 输入 120。完全还原：把安装器备份的 *.before-fps-unlock.bak 改名覆盖回原文件。
+还原到安装前：关闭游戏，双击 restore.bat 并确认。安装后在 F4 里改的其他设置不受影响。
+只想改回 120 帧：重新运行 install.bat 输入 120。
 改了帧数后启动不了：重新运行 install.bat 填 120。
 反馈问题请到项目主页提交 issue，并附上 contents\log.txt。
 常见问题和原理见项目主页。
@@ -40,8 +41,8 @@ Install
    (Knob Fix for High FPS) above 120 FPS and, on portrait monitors, sets Monitor Refresh Rate.
    Just start the game. Re-run install.bat to change the frame rate.
 
-Uninstall: re-run install.bat and enter 120. To restore everything, rename the installer's
-*.before-fps-unlock.bak backups back over the originals.
+Undo the install: close the game, run restore.bat and confirm. Other settings you changed in F4
+since installing are kept. To just go back to 120 FPS: re-run install.bat and enter 120.
 Game does not start after changing the frame rate: run install.bat again and enter 120.
 To report a problem, open an issue on the project page and attach contents\log.txt.
 See the project page for troubleshooting and details.

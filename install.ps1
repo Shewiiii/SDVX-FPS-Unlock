@@ -1,17 +1,23 @@
-﻿param([string]$GameDir, [int]$Fps = 0, [switch]$Yes)
+﻿param([string]$GameDir, [int]$Fps = 0, [switch]$Yes, [switch]$Restore)
 
 $ErrorActionPreference = 'Stop'
 $Presets = 60, 120, 144, 165, 180, 185, 240, 300
 $MinFps = 60
 $MaxFps = 1000
+# spice remembers a selection by a hash that includes name and description: changing either loses it
 $LimiterName = 'Frame Limiter Target (Experimental)'
+$LimiterDesc = "Changes the game's internal frame limiter (120 FPS by default). Use the same value for Game FPS Target and Note FPS Target. Parts of the game may run faster than normal."
 # mov ebx, 120000 ; mov edx, ebx ; mov rcx, rax ; call -- sets the game's internal frame limiter (mHz)
 $LimiterSig = 'BBC0D401008BD3488BC8E8'
 $KnobFixName = 'Knob Fix for High FPS'
+$KnobDesc = 'Makes slow knob turns register in menus (music select, level select, card registration) above 120 FPS. The game scales small knob movements by frame time; this removes the scaling.'
 # menu knob filter: lea eax,[r9+r9*4] ; add eax,eax ; movd xmm1,eax ; cvtdq2pd xmm1,xmm1 ; mulsd xmm1,xmm2 ; addsd xmm1,[rdi+18h]
 # the mulsd scales slow knob movement by frame time (1.0 = 1/120 s), so menus ignore slow turns above 120 FPS
 $KnobSig = '438D048903C0660F6EC8F30FE6C9F20F59CAF20F584F18'
 $KnobMulAt = 14
+$BakSuffix = '.before-fps-unlock.bak'
+$SdvxBlockRe = '(?s)<game name="Sound Voltex">.*?</game>'
+$RefreshRe = '<option name="graphics-force-refresh" value="([^"]*)"\s*/>'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Latin1 = [Text.Encoding]::GetEncoding(28591)
 $Utf8 = New-Object Text.UTF8Encoding $false
@@ -60,7 +66,9 @@ function Slice([byte[]]$b, [int]$off, [int]$len) { [byte[]]$b[$off..($off + $len
 function Le32([int]$v) { Hex ([BitConverter]::GetBytes([int32]$v)) }
 function Sha256([string]$s) { Hex ((New-Object Security.Cryptography.SHA256Managed).ComputeHash($Utf8.GetBytes($s))) }
 # spice identifies a patch by sha256(gameCode + patch file id + name + description)
-function Patch-Hash($p) { (Sha256 "$($p.gameCode)$patchId$($p.name)$($p.description)").ToLower() }
+function Patch-Hash($p, [string]$id) { (Sha256 "$($p.gameCode)$id$($p.name)$($p.description)").ToLower() }
+# a spice patch file is a top-level JSON array; Windows PowerShell 5.1 returns it as one object, so unroll it
+function Read-Patches([string]$path) { @((ConvertFrom-Json ([IO.File]::ReadAllText($path))) | ForEach-Object { $_ }) }
 # every file offset where the byte signature occurs ($text is the dll read as Latin-1)
 function Find-All([string]$text, [string]$hex) {
     $sig = $Latin1.GetString((Bytes $hex))
@@ -73,7 +81,7 @@ function New-Option([string]$name, [int]$offset, [string]$data) {
 }
 
 function Backup([string]$path) {
-    $bak = "$path.before-fps-unlock.bak"
+    $bak = "$path$BakSuffix"
     if (-not (Test-Path -LiteralPath $bak)) { Copy-Item -LiteralPath $path -Destination $bak }
 }
 
@@ -138,6 +146,130 @@ public static class SdvxDisplays {
 }
 '@ }
 
+# model:dest:spec:rev:ext from prop\ea3-ident.xml, the key spice uses for auto apply
+function Get-GameIdent {
+    $ident = Join-Path $contents 'prop\ea3-ident.xml'
+    if (-not (Test-Path -LiteralPath $ident)) { return $null }
+    $soft = ([xml][IO.File]::ReadAllText($ident)).SelectSingleNode('/ea3_conf/soft')
+    (@('model', 'dest', 'spec', 'rev', 'ext') | ForEach-Object { $soft.SelectSingleNode($_).InnerText }) -join ':'
+}
+
+# --- restore: undo what the installer changed, using the backups it made the first time.
+# Patch files are replaced by their backup. In the spice settings only the installer's own entries are put
+# back to their old values, so changes made in F4 after installing (key bindings, other patches) are kept.
+function Test-Ours([string]$path) {
+    @(Read-Patches $path | Where-Object { $_.name -eq $LimiterName -or $_.name -eq $KnobFixName }).Count -gt 0
+}
+
+# returns the ids of the patch files the installer had changed (their selections get reverted too)
+function Restore-PatchFiles {
+    $dir = Join-Path $contents 'patches'
+    if (-not (Test-Path -LiteralPath $dir)) { return }
+    $paths = @(Get-ChildItem -LiteralPath $dir | Where-Object { $_.Name -like '*.json' -or $_.Name -like "*.json$BakSuffix" } |
+        ForEach-Object { $_.FullName -replace ([regex]::Escape($BakSuffix) + '$'), '' } | Sort-Object -Unique)
+    foreach ($path in $paths) {
+        $bak = "$path$BakSuffix"
+        $name = Split-Path -Leaf $path
+        $exists = Test-Path -LiteralPath $path
+        $ours = $exists -and (Test-Ours $path)
+        if (Test-Path -LiteralPath $bak) {
+            if ($ours -or -not $exists) {
+                Move-Item -LiteralPath $bak -Destination $path -Force
+                Ok "已还原  patches\$name" "Restored  patches\$name"
+            } else {
+                # replaced since the install (e.g. updated from spice's patch server), so it is clean already
+                Remove-Item -LiteralPath $bak
+                Ok "patches\$name 已经是原样，删除旧备份" "patches\$name is unmodified already; removed the old backup"
+            }
+        } elseif ($ours) {
+            Warn "patches\$name 没有备份，文件保留原样（里面的补丁不会再被选中）" "patches\$name has no backup and is kept as is (its patches will no longer be selected)"
+        } else { continue }
+        [IO.Path]::GetFileNameWithoutExtension($path)
+    }
+}
+
+function Restore-Selections([string[]]$ids) {
+    $bak = "$managerFile$BakSuffix"
+    if (-not $managerFile -or -not (Test-Path -LiteralPath $bak)) { return }
+    $old = ConvertFrom-Json ([IO.File]::ReadAllText($bak))
+    $cfg = ConvertFrom-Json ([IO.File]::ReadAllText($managerFile))
+    if (-not $cfg.union_patches_enabled) { $cfg | Add-Member -NotePropertyName union_patches_enabled -NotePropertyValue ([pscustomobject]@{}) -Force }
+    $lim = [pscustomobject]@{ gameCode = 'KFC'; name = $LimiterName; description = $LimiterDesc }
+    $kn = [pscustomobject]@{ gameCode = 'KFC'; name = $KnobFixName; description = $KnobDesc }
+    foreach ($id in $ids) {
+        $file = Join-Path $contents "patches\$id.json"
+        $targets = @()
+        if (Test-Path -LiteralPath $file) { $targets = @(Read-Patches $file | Where-Object { $_.name -in 'Game FPS Target', 'Note FPS Target' }) }
+        foreach ($p in $targets + $lim) {
+            $h = Patch-Hash $p $id
+            $was = if ($old.union_patches_enabled) { $old.union_patches_enabled.$h } else { $null }
+            if ($null -ne $was) { $cfg.union_patches_enabled | Add-Member -NotePropertyName $h -NotePropertyValue $was -Force }
+            else { $cfg.union_patches_enabled.PSObject.Properties.Remove($h) }
+        }
+        $h = Patch-Hash $kn $id
+        if ($null -ne $cfg.patches_enabled) {
+            $on = @($cfg.patches_enabled | Where-Object { $_ -and $_ -ne $h })
+            if (@($old.patches_enabled) -contains $h) { $on += $h }
+            $cfg | Add-Member -NotePropertyName patches_enabled -NotePropertyValue $on -Force
+        }
+    }
+    $ident = Get-GameIdent
+    if ($ident -and @($old.auto_apply) -notcontains $ident -and @($cfg.auto_apply) -contains $ident) {
+        $cfg | Add-Member -NotePropertyName auto_apply -NotePropertyValue @($cfg.auto_apply | Where-Object { $_ -and $_ -ne $ident }) -Force
+    }
+    Write-Text $managerFile (ConvertTo-Json -InputObject $cfg -Depth 20)
+    Remove-Item -LiteralPath $bak
+    Ok '已还原 spice2x 的补丁选择' 'Restored the patch selection in spice2x'
+}
+
+function Restore-Refresh {
+    $bak = "$spiceXml$BakSuffix"
+    if (-not $spiceXml -or -not (Test-Path -LiteralPath $bak)) { return }
+    $oldBlock = [regex]::Match([IO.File]::ReadAllText($bak), $SdvxBlockRe)
+    $text = [IO.File]::ReadAllText($spiceXml)
+    $block = [regex]::Match($text, $SdvxBlockRe)
+    if (-not $oldBlock.Success -or -not $block.Success) {
+        Warn 'spicetools.xml 里没找到 Sound Voltex 的设置，Monitor Refresh Rate 没有还原（备份保留）' 'No Sound Voltex section in spicetools.xml; Monitor Refresh Rate was not restored (backup kept)'
+        return
+    }
+    $was = [regex]::Match($oldBlock.Value, $RefreshRe)
+    $now = [regex]::Match($block.Value, $RefreshRe)
+    $new = $block.Value
+    if ($was.Success -and $now.Success) { $new = $new.Remove($now.Index, $now.Length).Insert($now.Index, $was.Value) }
+    elseif ($now.Success) { $new = ([regex]('\r?\n[ \t]*' + $RefreshRe)).Replace($new, '', 1) }  # the installer added the line
+    if ($new -ne $block.Value) { Write-Text $spiceXml ($text.Remove($block.Index, $block.Length).Insert($block.Index, $new)) }
+    Remove-Item -LiteralPath $bak
+    $value = if ($was.Success -and $was.Groups[1].Value) { "$($was.Groups[1].Value) Hz" } else { T '未设置' 'not set' }
+    Ok "已还原 Monitor Refresh Rate  $value" "Restored Monitor Refresh Rate  $value"
+}
+
+function Invoke-Restore {
+    Write-Host ''
+    Write-Host ' R ' -ForegroundColor Black -BackgroundColor Yellow -NoNewline
+    Write-Host "  $(T '还原到安装前' 'Restore to before installing')" -ForegroundColor Yellow
+    $dir = Join-Path $contents 'patches'
+    $baks = @()
+    if (Test-Path -LiteralPath $dir) { $baks += @(Get-ChildItem -LiteralPath $dir | Where-Object { $_.Name -like "*$BakSuffix" } | ForEach-Object { $_.FullName }) }
+    foreach ($f in @($managerFile, $spiceXml)) { if ($f -and (Test-Path -LiteralPath "$f$BakSuffix")) { $baks += "$f$BakSuffix" } }
+    if (-not $baks.Count) {
+        Ok '没有找到安装器留下的备份，不需要还原' 'No backups from the installer were found; nothing to restore'
+        return
+    }
+    Say '会用这些备份还原补丁文件，并把 spice2x 里的帧数补丁选择和 Monitor Refresh Rate 改回安装前；安装后你在 F4 里改的其他设置不受影响' 'These backups restore the patch files and put the frame rate patch selection and Monitor Refresh Rate in spice2x back to before installing; other settings you changed in F4 since are kept' 'DarkGray'
+    foreach ($b in $baks) { Item (T '备份' 'Backup') $b }
+    if (-not $Yes) {
+        $ok = Ask '确定还原？(y/N)' 'Restore now? (y/N)'
+        if ($ok -notmatch '^[yY]') { Fail '已取消' 'Cancelled' 9 }
+    }
+    $ids = @(Restore-PatchFiles)
+    Restore-Selections $ids
+    Restore-Refresh
+    Write-Host ''
+    Rule
+    Write-Host ('  ' + (T '还原完成，重新启动游戏后生效' 'Restored. Restart the game for it to take effect')) -ForegroundColor Green
+    Rule
+}
+
 Write-Host ''
 Write-Host '  SDVX FPS Unlock  ' -ForegroundColor Black -BackgroundColor Cyan -NoNewline
 Write-Host ('  ' + (T '解除 SOUND VOLTEX 的 120 帧限制' 'Lift the 120 FPS cap of SOUND VOLTEX')) -ForegroundColor DarkGray
@@ -155,7 +287,29 @@ while (-not $contents) {
 }
 Ok "游戏目录  $contents" "Game folder  $contents"
 
-if (Get-Process -Name spice64 -ErrorAction SilentlyContinue) { Fail '游戏正在运行，请先关闭游戏再安装。' 'The game is running. Close it first.' 3 }
+if (Get-Process -Name spice64 -ErrorAction SilentlyContinue) { Fail '游戏正在运行，请先关闭游戏。' 'The game is running. Close it first.' 3 }
+
+# --- spice2x settings: the last launch's arguments in log.txt tell where the launcher keeps them
+$logArgs = ''
+$logFile = Join-Path $contents 'log.txt'
+if (Test-Path -LiteralPath $logFile) { $logArgs = (Get-Content -LiteralPath $logFile -TotalCount 60 -Encoding UTF8) -join "`n" }
+function Find-Config([string]$flag, [string]$file) {
+    $m = [regex]::Match($logArgs, "(?m)^\s*-$flag\s+(.+?)\s*$")
+    $cands = @()
+    if ($m.Success) { $p = $m.Groups[1].Value.Trim('"'); $cands += $(if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $contents $p }) }
+    $cands += (Join-Path $contents $file), (Join-Path $env:APPDATA "spice2x\$file"), (Join-Path $env:APPDATA $file)
+    foreach ($c in $cands) { if (Test-Path -LiteralPath $c) { return (Resolve-Path -LiteralPath $c).Path } }
+    return $null
+}
+$spiceXml = Find-Config 'cfgpath' 'spicetools.xml'
+$managerFile = Find-Config 'patchcfgpath' 'spicetools_patch_manager.json'
+
+# restore works on any game version, so it runs before the version checks below
+if ($Restore) {
+    Invoke-Restore
+    Write-Host ''
+    exit 0
+}
 
 # --- identify the game version from the PE header, the same way spice names its patch files
 $dll = [IO.File]::ReadAllBytes((Join-Path $contents 'modules\soundvoltex.dll'))
@@ -169,9 +323,7 @@ if (-not (Test-Path -LiteralPath $patchFile)) {
 }
 Ok "游戏版本  $patchId" "Game version  $patchId"
 
-$json = [IO.File]::ReadAllText($patchFile)
-# Windows PowerShell 5.1 emits a top-level JSON array as a single object; pipe it to unroll
-$patches = @((ConvertFrom-Json $json) | ForEach-Object { $_ })
+$patches = Read-Patches $patchFile
 $game = $patches | Where-Object { $_.name -eq 'Game FPS Target' } | Select-Object -First 1
 $note = $patches | Where-Object { $_.name -eq 'Note FPS Target' } | Select-Object -First 1
 if (-not $game -or -not $note) { Fail '补丁文件里没有 Game FPS Target / Note FPS Target。' 'Game FPS Target / Note FPS Target not found in the patch file.' 4 }
@@ -201,32 +353,17 @@ $knob = $null
 if ($kHits.Count -eq 1) {
     $knob = [pscustomobject]@{
         name = $KnobFixName
-        description = 'Makes slow knob turns register in menus (music select, level select, card registration) above 120 FPS. The game scales small knob movements by frame time; this removes the scaling.'
+        description = $KnobDesc
         gameCode = 'KFC'
         type = 'memory'
         patches = @([pscustomobject]@{ offset = $kHits[0] + $KnobMulAt; dllName = 'soundvoltex.dll'; dataDisabled = 'F20F59CA'; dataEnabled = '0F1F4000' })
     }
 }
 
-# --- spice2x settings: the last launch's arguments in log.txt tell where the launcher keeps them
-$logArgs = ''
-$logFile = Join-Path $contents 'log.txt'
-if (Test-Path -LiteralPath $logFile) { $logArgs = (Get-Content -LiteralPath $logFile -TotalCount 60 -Encoding UTF8) -join "`n" }
-function Find-Config([string]$flag, [string]$file) {
-    $m = [regex]::Match($logArgs, "(?m)^\s*-$flag\s+(.+?)\s*$")
-    $cands = @()
-    if ($m.Success) { $p = $m.Groups[1].Value.Trim('"'); $cands += $(if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $contents $p }) }
-    $cands += (Join-Path $contents $file), (Join-Path $env:APPDATA "spice2x\$file"), (Join-Path $env:APPDATA $file)
-    foreach ($c in $cands) { if (Test-Path -LiteralPath $c) { return (Resolve-Path -LiteralPath $c).Path } }
-    return $null
-}
-$spiceXml = Find-Config 'cfgpath' 'spicetools.xml'
-$managerFile = Find-Config 'patchcfgpath' 'spicetools_patch_manager.json'
-
 $xmlText = $null; $sdvxBlock = $null
 if ($spiceXml) {
     $xmlText = [IO.File]::ReadAllText($spiceXml)
-    $sdvxBlock = [regex]::Match($xmlText, '(?s)<game name="Sound Voltex">.*?</game>')
+    $sdvxBlock = [regex]::Match($xmlText, $SdvxBlockRe)
     if (-not $sdvxBlock.Success) { $sdvxBlock = $null }
 }
 
@@ -308,7 +445,7 @@ $note.patches = @($n60) + @(foreach ($r in $Rates | Where-Object { $_ -ne 60 }) 
 
 $limiter = [pscustomobject]@{
     name = $LimiterName
-    description = "Changes the game's internal frame limiter (120 FPS by default). Use the same value for Game FPS Target and Note FPS Target. Parts of the game may run faster than normal."
+    description = $LimiterDesc
     gameCode = 'KFC'
     type = 'union'
     patches = @(foreach ($r in $Rates | Where-Object { $_ -ne 60 -or $Fps -eq 60 }) {
@@ -342,20 +479,18 @@ if ($managerFile) {
     if (-not $cfg.union_patches_enabled) { $cfg | Add-Member -NotePropertyName union_patches_enabled -NotePropertyValue ([pscustomobject]@{}) -Force }
     foreach ($p in @($game, $note, $limiter)) {
         $opt = $p.patches | Where-Object { $_.name -match "^$Fps FPS( \(Default\))?$" } | Select-Object -First 1
-        $cfg.union_patches_enabled | Add-Member -NotePropertyName (Patch-Hash $p) -NotePropertyValue $opt.name -Force
+        $cfg.union_patches_enabled | Add-Member -NotePropertyName (Patch-Hash $p $patchId) -NotePropertyValue $opt.name -Force
     }
     # on/off patches are a plain list of enabled hashes; the knob fix is only wanted above 120 FPS
     if ($knob -and ($knobOn -or $null -ne $cfg.patches_enabled)) {
-        $kHash = Patch-Hash $knob
+        $kHash = Patch-Hash $knob $patchId
         $enabled = @($cfg.patches_enabled | Where-Object { $_ -and $_ -ne $kHash })
         if ($knobOn) { $enabled += $kHash }
         $cfg | Add-Member -NotePropertyName patches_enabled -NotePropertyValue $enabled -Force
     }
     # auto apply makes spice apply the saved selection at every launch
-    $ident = Join-Path $contents 'prop\ea3-ident.xml'
-    if (Test-Path -LiteralPath $ident) {
-        $soft = ([xml][IO.File]::ReadAllText($ident)).SelectSingleNode('/ea3_conf/soft')
-        $gameIdent = (@('model', 'dest', 'spec', 'rev', 'ext') | ForEach-Object { $soft.SelectSingleNode($_).InnerText }) -join ':'
+    $gameIdent = Get-GameIdent
+    if ($gameIdent) {
         $auto = @($cfg.auto_apply | Where-Object { $_ })
         if ($auto -notcontains $gameIdent) { $cfg | Add-Member -NotePropertyName auto_apply -NotePropertyValue @($auto + $gameIdent) -Force }
     }
@@ -374,8 +509,7 @@ if ($managerFile) {
 $refreshDone = $false; $refreshChanged = $false
 if ($sdvxBlock -and ($gameRates -contains $Fps)) {
     $block = $sdvxBlock.Value
-    $re = '<option name="graphics-force-refresh" value="([^"]*)"\s*/>'
-    $m = [regex]::Match($block, $re)
+    $m = [regex]::Match($block, $RefreshRe)
     $newBlock = $null
     if ($m.Success -and ($portrait -or $m.Groups[1].Value)) {
         $newBlock = $block.Remove($m.Index, $m.Length).Insert($m.Index, "<option name=`"graphics-force-refresh`" value=`"$Fps`"/>")

@@ -12,6 +12,7 @@ if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 New-Item -ItemType Directory -Path $stage | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $root 'install.bat') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $root 'restore.bat') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'install.ps1') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'release\README.txt') -Destination $stage
 

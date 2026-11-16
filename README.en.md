@@ -31,7 +31,7 @@ If you enter a rate the monitor does not support, the installer warns you and le
 
 **3. Start the game as usual**; turn on the FPS counter in the ESC menu
 
-To change the frame rate, or after a game update, just run `install.bat` again.
+To change the frame rate, or after a game update, just run `install.bat` again. To undo the install, run `restore.bat`.
 
 > [!IMPORTANT]
 > - **Enter a refresh rate your monitor supports** (the installer lists them; e.g. 144 for a 144 Hz monitor). A mismatch stutters, and on portrait monitors Live2D character animations also run too fast or slow.
@@ -104,7 +104,9 @@ Enable **F4 → Options → Windowed** and keep the SDVX subscreen redraw option
 <details>
 <summary><b>How to uninstall</b></summary>
 
-Run `install.bat` again and enter 120. To restore everything, rename the installer's `*.before-fps-unlock.bak` backups back over the originals (paths are shown during install).
+Close the game, run **`restore.bat`** and confirm to go back to how things were before installing: the patch files are restored from their backups, and the frame rate patch selection, knob fix and Monitor Refresh Rate in spice2x get their old values back. Other settings you changed in F4 since (key bindings, other patches) are kept.
+
+To just go back to 120 FPS, you can also run `install.bat` again and enter 120.
 
 </details>
 
