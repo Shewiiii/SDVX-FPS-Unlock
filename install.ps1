@@ -10,7 +10,7 @@ $LimiterDesc = "Changes the game's internal frame limiter (120 FPS by default). 
 # mov ebx, 120000 ; mov edx, ebx ; mov rcx, rax ; call -- sets the game's internal frame limiter (mHz)
 $LimiterSig = 'BBC0D401008BD3488BC8E8'
 $KnobFixName = 'Knob Fix for High FPS'
-$KnobDesc = 'Makes slow knob turns register in menus (music/level select, player name registration) above 120 FPS. The game scales small knob movements by frame time. This removes the scaling.'
+$KnobDesc = 'Makes slow knob turns register in menus above 120 FPS. Works best with refresh rates multiple of 120: knobs might not be speed consistent otherwise because of input sampling variation.'
 # Sample menu input at 120 Hz and keep its threshold independent of Game FPS Target
 $KnobSig = '438D048903C0660F6EC8F30FE6C9F20F59CAF20F584F18'
 $KnobSpecs = @'
